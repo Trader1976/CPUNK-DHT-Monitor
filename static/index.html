@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>CPUNK DHT Monitor</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      color-scheme: dark;
+    }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+        "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top, #020617 0, #020617 40%, #000 100%);
+      color: #e5e7eb;
+    }
+    .wrap {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 16px 16px 40px;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .title {
+      font-size: 22px;
+      font-weight: 700;
+    }
+    .subtitle {
+      font-size: 13px;
+      color: #9ca3af;
+      margin-top: 4px;
+    }
+    .badge {
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: #111827;
+      border: 1px solid #1f2937;
+    }
+    .badge.offline {
+      background: #7f1d1d;
+      border-color: #b91c1c;
+      color: #fee2e2;
+    }
+    .badge.health-ok {
+      background: #064e3b;
+      border-color: #10b981;
+      color: #d1fae5;
+    }
+    .badge.health-idle {
+      background: #78350f;
+      border-color: #f59e0b;
+      color: #fffbeb;
+    }
+    .badge.health-stale {
+      background: #7f1d1d;
+      border-color: #b91c1c;
+      color: #fee2e2;
+    }
+    .badge.health-cold {
+      background: #111827;
+      border-color: #4b5563;
+      color: #e5e7eb;
+    }
+
+
+    .spark-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    @media (max-width: 800px) {
+      .spark-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+    @media (max-width: 560px) {
+      .spark-grid {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+    .spark-card {
+      background: radial-gradient(circle at top left, #020617 0, #020617 60%, #000 100%);
+      border-radius: 16px;
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      padding: 8px 10px;
+      box-shadow: 0 18px 40px rgba(15, 23, 42, 0.65);
+    }
+    .spark-title {
+      font-size: 11px;
+      color: #9ca3af;
+      margin-bottom: 4px;
+    }
+    .spark-wrapper {
+      height: 60px;
+    }
+    .spark-wrapper canvas {
+      width: 100%;
+      height: 60px;
+    }
+
+
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    @media (max-width: 800px) {
+      .grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      header {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+    }
+    @media (max-width: 560px) {
+      .grid {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+    .card {
+      background: radial-gradient(circle at top left, #0b1120 0, #020617 50%, #000 100%);
+      border-radius: 16px;
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      padding: 12px 14px;
+      box-shadow: 0 18px 40px rgba(15, 23, 42, 0.65);
+    }
+    .metric-label {
+      font-size: 12px;
+      color: #9ca3af;
+      margin-bottom: 4px;
+    }
+    .metric-value {
+      font-size: 24px;
+      font-weight: 600;
+    }
+    .metric-sub {
+      font-size: 11px;
+      color: #6b7280;
+      margin-top: 2px;
+    }
+    .charts {
+      display: grid;
+      grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    @media (max-width: 900px) {
+      .charts {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+    .chart-card {
+      background: radial-gradient(circle at top left, #020617 0, #020617 60%, #000 100%);
+      border-radius: 16px;
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      padding: 12px 14px;
+      box-shadow: 0 18px 40px rgba(15, 23, 42, 0.65);
+    }
+    .chart-title {
+      font-size: 13px;
+      color: #9ca3af;
+      margin-bottom: 6px;
+    }
+    canvas {
+      width: 100%;
+      height: 260px;
+    }
+    .table-card {
+      background: radial-gradient(circle at top left, #020617 0, #020617 60%, #000 100%);
+      border-radius: 16px;
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      padding: 12px 14px;
+      box-shadow: 0 18px 40px rgba(15, 23, 42, 0.65);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    th,
+    td {
+      padding: 6px 4px;
+      text-align: left;
+      border-bottom: 1px solid rgba(31, 41, 55, 0.8);
+    }
+    th {
+      font-size: 11px;
+      color: #9ca3af;
+      font-weight: 500;
+    }
+    tbody tr:last-child td {
+      border-bottom: none;
+    }
+    .ip {
+      font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
+        Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 11px;
+    }
+    .footer {
+      margin-top: 16px;
+      font-size: 11px;
+      color: #6b7280;
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <div class="title">CPUNK DHT Peer & Traffic Monitor</div>
+        <div class="subtitle" id="subtitle-line">
+          Loading node info…
+        </div>
+      </div>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <div class="badge health-cold" id="health-badge">COLD</div>
+        <div class="badge" id="live-badge">LIVE</div>
+      </div>
+    </header>
+
+    <div class="grid">
+      <div class="card">
+        <div class="metric-label">Current peers (unique IPs)</div>
+        <div class="metric-value" id="metric-current-peers">0</div>
+        <div class="metric-sub" id="metric-max-peers">Max peers: &ndash;</div>
+      </div>
+      <div class="card">
+        <div class="metric-label">Traffic (last window)</div>
+        <div class="metric-value" id="metric-current-traffic">0 KB</div>
+        <div class="metric-sub" id="metric-max-traffic">Peak window: &ndash;</div>
+      </div>
+      <div class="card">
+        <div class="metric-label">Total traffic (all time)</div>
+        <div class="metric-value" id="metric-total-traffic">0 MB</div>
+        <div class="metric-sub" id="metric-data-points">Data points: &ndash;</div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <div class="metric-label">CPU usage</div>
+        <div class="metric-value" id="metric-cpu">–</div>
+        <div class="metric-sub" id="metric-cpu-sub">Last window</div>
+      </div>
+      <div class="card">
+        <div class="metric-label">Memory usage</div>
+        <div class="metric-value" id="metric-mem">–</div>
+        <div class="metric-sub" id="metric-mem-sub">–</div>
+      </div>
+      <div class="card">
+        <div class="metric-label">Disk usage (root)</div>
+        <div class="metric-value" id="metric-disk">–</div>
+        <div class="metric-sub" id="metric-disk-sub">–</div>
+      </div>
+    </div>
+
+    <div class="spark-grid">
+      <div class="spark-card">
+        <div class="spark-title">CPU % trend</div>
+        <div class="spark-wrapper">
+          <canvas id="cpuSpark"></canvas>
+        </div>
+      </div>
+      <div class="spark-card">
+        <div class="spark-title">RAM % trend</div>
+        <div class="spark-wrapper">
+          <canvas id="memSpark"></canvas>
+        </div>
+      </div>
+      <div class="spark-card">
+        <div class="spark-title">Disk % trend</div>
+        <div class="spark-wrapper">
+          <canvas id="diskSpark"></canvas>
+        </div>
+      </div>
+    </div>
+
+
+    <div class="charts">
+      <div class="chart-card">
+        <div class="chart-title">Peers over time</div>
+        <canvas id="peersChart"></canvas>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Traffic over time (KB per window)</div>
+        <canvas id="trafficChart"></canvas>
+      </div>
+    </div>
+
+    <div class="table-card">
+      <div class="chart-title">Top talkers (last window)</div>
+      <table>
+        <thead>
+          <tr>
+            <th>IP</th>
+            <th>Bytes</th>
+            <th>Packets</th>
+          </tr>
+        </thead>
+        <tbody id="top-talkers-body">
+        </tbody>
+      </table>
+    </div>
+
+    <div class="footer">
+      <div id="iface-line">Interface: –</div>
+      <div>CPUNK / DNA-Messenger infra helper</div>
+    </div>
+  </div>
+
+  <script>
+    let intervalSeconds = 60; // will be updated from /config.json
+    let peersChart;
+    let trafficChart;
+    let chartsInitialized = false;
+
+    let lastFetchOk = 0;
+
+    let cpuSpark;
+    let memSpark;
+    let diskSpark;
+    let sparksInitialized = false;
+
+    function formatBytesToKB(bytes) {
+      return (bytes / 1024).toFixed(1);
+    }
+
+    function formatBytesToMB(bytes) {
+      return (bytes / (1024 * 1024)).toFixed(2);
+    }
+
+    function initCharts(labels, peers, trafficKB) {
+      const peersCtx = document.getElementById('peersChart').getContext('2d');
+      const trafficCtx = document.getElementById('trafficChart').getContext('2d');
+
+      peersChart = new Chart(peersCtx, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'Unique peers',
+            data: peers,
+            tension: 0.2,
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { display: false }
+          },
+          scales: {
+            x: {
+              ticks: {
+                maxRotation: 0,
+                autoSkip: true,
+              }
+            },
+            y: {
+              beginAtZero: true,
+              ticks: { precision: 0 }
+            }
+          }
+        }
+      });
+
+      trafficChart = new Chart(trafficCtx, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'KB per window',
+            data: trafficKB,
+            tension: 0.2,
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { display: false }
+          },
+          scales: {
+            x: {
+              ticks: {
+                maxRotation: 0,
+                autoSkip: true,
+              }
+            },
+            y: {
+              beginAtZero: true
+            }
+          }
+        }
+      });
+
+      chartsInitialized = true;
+    }
+
+    function updateCharts(labels, peers, trafficKB) {
+      if (!peersChart || !trafficChart) return;
+
+      peersChart.data.labels = labels;
+      peersChart.data.datasets[0].data = peers;
+      peersChart.update('none');
+
+      trafficChart.data.labels = labels;
+      trafficChart.data.datasets[0].data = trafficKB;
+      trafficChart.update('none');
+    }
+
+
+
+    function initSparklines(labels, cpuSeries, memSeries, diskSeries) {
+      const cpuCtx = document.getElementById('cpuSpark').getContext('2d');
+      const memCtx = document.getElementById('memSpark').getContext('2d');
+      const diskCtx = document.getElementById('diskSpark').getContext('2d');
+
+      const baseOptions = {
+        responsive: true,
+        plugins: {
+          legend: { display: false },
+          tooltip: { enabled: true },
+        },
+        scales: {
+          x: {
+            display: false,
+          },
+          y: {
+            display: false,
+            beginAtZero: true,
+          }
+        },
+        elements: {
+          point: {
+            radius: 0,
+          }
+        }
+      };
+
+      cpuSpark = new Chart(cpuCtx, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [{
+            data: cpuSeries,
+            tension: 0.2,
+          }]
+        },
+        options: baseOptions
+      });
+
+      memSpark = new Chart(memCtx, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [{
+            data: memSeries,
+            tension: 0.2,
+          }]
+        },
+        options: baseOptions
+      });
+
+      diskSpark = new Chart(diskCtx, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [{
+            data: diskSeries,
+            tension: 0.2,
+          }]
+        },
+        options: baseOptions
+      });
+
+      sparksInitialized = true;
+    }
+
+    function updateSparklines(labels, cpuSeries, memSeries, diskSeries) {
+      if (!cpuSpark || !memSpark || !diskSpark) return;
+
+      cpuSpark.data.labels = labels;
+      cpuSpark.data.datasets[0].data = cpuSeries;
+      cpuSpark.update('none');
+
+      memSpark.data.labels = labels;
+      memSpark.data.datasets[0].data = memSeries;
+      memSpark.update('none');
+
+      diskSpark.data.labels = labels;
+      diskSpark.data.datasets[0].data = diskSeries;
+      diskSpark.update('none');
+    }
+
+
+
+
+
+    async function fetchConfig() {
+      try {
+        const resp = await fetch("/config.json");
+        if (!resp.ok) {
+          console.error("config.json HTTP error", resp.status);
+          return;
+        }
+        const cfg = await resp.json();
+        if (cfg.interval_seconds) {
+          intervalSeconds = cfg.interval_seconds;
+        }
+
+        const subtitle = document.getElementById("subtitle-line");
+        if (subtitle) {
+          subtitle.textContent =
+            "Host " + (cfg.hostname || "?") +
+            " — UDP port " + (cfg.port || "?") +
+            " • updated every " + intervalSeconds + " s";
+        }
+
+        const ifaceLine = document.getElementById("iface-line");
+        if (ifaceLine && cfg.iface) {
+          ifaceLine.textContent = "Interface: " + cfg.iface;
+        }
+      } catch (e) {
+        console.error("Error fetching config:", e);
+      }
+    }
+
+    async function fetchMetrics() {
+      try {
+        const resp = await fetch("/metrics.json");
+        if (!resp.ok) {
+          console.error("metrics.json HTTP error", resp.status);
+          return;
+        }
+        const data = await resp.json();
+        lastFetchOk = Date.now();
+
+        const history = data.history || [];
+        const latestTop = data.latest_top || [];
+
+        document.getElementById('metric-data-points').textContent =
+          "Data points: " + history.length;
+
+        if (history.length === 0) {
+          document.getElementById('metric-current-peers').textContent = "0";
+          document.getElementById('metric-current-traffic').textContent = "0 KB";
+          document.getElementById('metric-total-traffic').textContent = "0 MB";
+          document.getElementById('metric-max-peers').textContent = "Max peers: –";
+          document.getElementById('metric-max-traffic').textContent = "Peak window: –";
+          updateTopTalkers([]);
+          return;
+        }
+
+        const labels = history.map(h => {
+          const ts = h.ts || "";
+          if (!ts) return "";
+          const t = ts.split("T")[1] || "";
+          return t.slice(0, 5);
+        });
+
+        const peers = history.map(h => h.unique_peers || 0);
+        const trafficKB = history.map(h => (h.total_bytes || 0) / 1024.0);
+
+        // System metric series for sparklines
+        const cpuSeries = history.map(h => {
+          const v = h.cpu_usage;
+          return (v === null || v === undefined) ? null : v;
+        });
+
+        const memPctSeries = history.map(h => {
+          const used = h.mem_used_mb;
+          const total = h.mem_total_mb;
+          if (
+            used === null || used === undefined ||
+            total === null || total === undefined ||
+            total <= 0
+          ) {
+            return null;
+          }
+          return (used / total) * 100.0;
+        });
+
+        const diskSeries = history.map(h => {
+          const v = h.disk_used_pct;
+          return (v === null || v === undefined) ? null : v;
+        });
+
+
+
+        const latest = history[history.length - 1];
+
+        document.getElementById('metric-current-peers').textContent =
+          latest.unique_peers || 0;
+
+        const lastKB = latest.total_bytes ? formatBytesToKB(latest.total_bytes) : "0.0";
+        document.getElementById('metric-current-traffic').textContent =
+          lastKB + " KB";
+
+        const totalBytes = history.reduce((acc, h) => acc + (h.total_bytes || 0), 0);
+        document.getElementById('metric-total-traffic').textContent =
+          formatBytesToMB(totalBytes) + " MB";
+
+
+
+
+        // --- System metrics ---
+
+        // CPU
+        const cpu = latest.cpu_usage;
+        if (cpu !== undefined && cpu !== null) {
+          document.getElementById('metric-cpu').textContent =
+            cpu.toFixed(1) + " %";
+        } else {
+          document.getElementById('metric-cpu').textContent = "–";
+        }
+
+        // Memory
+        const memUsedMb = latest.mem_used_mb;
+        const memTotalMb = latest.mem_total_mb;
+        if (
+          memUsedMb !== undefined && memUsedMb !== null &&
+          memTotalMb !== undefined && memTotalMb !== null &&
+          memTotalMb > 0
+        ) {
+          const memPct = (memUsedMb / memTotalMb) * 100;
+          document.getElementById('metric-mem').textContent =
+            memPct.toFixed(1) + " %";
+          document.getElementById('metric-mem-sub').textContent =
+            memUsedMb.toFixed(0) + " / " + memTotalMb.toFixed(0) + " MB";
+        } else {
+          document.getElementById('metric-mem').textContent = "–";
+          document.getElementById('metric-mem-sub').textContent = "No data";
+        }
+
+        // Disk
+        const diskPct = latest.disk_used_pct;
+        const diskUsedGb = latest.disk_used_gb;
+        const diskFreeGb = latest.disk_free_gb;
+        if (
+          diskPct !== undefined && diskPct !== null &&
+          diskUsedGb !== undefined && diskUsedGb !== null &&
+          diskFreeGb !== undefined && diskFreeGb !== null
+        ) {
+          document.getElementById('metric-disk').textContent =
+            diskPct.toFixed(1) + " %";
+          document.getElementById('metric-disk-sub').textContent =
+            diskUsedGb.toFixed(1) + " used / " +
+            diskFreeGb.toFixed(1) + " free GB";
+        } else {
+          document.getElementById('metric-disk').textContent = "–";
+          document.getElementById('metric-disk-sub').textContent = "No data";
+        }
+
+
+
+        const maxPeers = Math.max(...peers);
+        document.getElementById('metric-max-peers').textContent =
+          "Max peers: " + maxPeers;
+
+        const maxBytes = history.reduce(
+          (max, h) => Math.max(max, h.total_bytes || 0),
+          0
+        );
+        document.getElementById('metric-max-traffic').textContent =
+          "Peak window: " + formatBytesToKB(maxBytes) + " KB";
+
+        if (!chartsInitialized) {
+          initCharts(labels, peers, trafficKB);
+        } else {
+          updateCharts(labels, peers, trafficKB);
+        }
+
+        if (!sparksInitialized) {
+          initSparklines(labels, cpuSeries, memPctSeries, diskSeries);
+        } else {
+          updateSparklines(labels, cpuSeries, memPctSeries, diskSeries);
+        }
+
+        updateTopTalkers(latestTop);
+
+
+
+      } catch (e) {
+        console.error("Error fetching metrics:", e);
+      }
+    }
+
+    function updateTopTalkers(top) {
+      const tbody = document.getElementById('top-talkers-body');
+      tbody.innerHTML = "";
+
+      if (!top || top.length === 0) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 3;
+        td.textContent = "No data in last window";
+        td.style.color = "#6b7280";
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        return;
+      }
+
+      top.forEach(entry => {
+        const tr = document.createElement('tr');
+
+        const tdIp = document.createElement('td');
+        tdIp.textContent = entry.ip || "";
+        tdIp.className = "ip";
+        tr.appendChild(tdIp);
+
+        const tdBytes = document.createElement('td');
+        tdBytes.textContent = entry.bytes || 0;
+        tr.appendChild(tdBytes);
+
+        const tdPackets = document.createElement('td');
+        tdPackets.textContent = entry.packets || 0;
+        tr.appendChild(tdPackets);
+
+        tbody.appendChild(tr);
+      });
+    }
+
+    function updateLiveBadge() {
+      const badge = document.getElementById('live-badge');
+      if (!badge) return;
+
+      const now = Date.now();
+      const ageMs = now - lastFetchOk;
+
+      if (ageMs > intervalSeconds * 3 * 1000) {
+        badge.textContent = "OFFLINE";
+        badge.classList.add("offline");
+      } else {
+        badge.textContent = "LIVE";
+        badge.classList.remove("offline");
+      }
+    }
+
+    async function fetchHealth() {
+      const badge = document.getElementById('health-badge');
+      if (!badge) return;
+
+      try {
+        const resp = await fetch("/health");
+        if (!resp.ok) {
+          badge.textContent = "ERROR";
+          badge.className = "badge health-stale";
+          return;
+        }
+
+        const data = await resp.json();
+        console.log("Health data:", data);
+
+        const status = (data.status || "unknown").toLowerCase();
+
+        badge.className = "badge";
+
+        let label = "UNKNOWN";
+
+        switch (status) {
+          case "ok":
+            label = "OK";
+            badge.classList.add("health-ok");
+            break;
+          case "idle":
+            label = "IDLE";
+            badge.classList.add("health-idle");
+            break;
+          case "cold":
+            label = "COLD";
+            badge.classList.add("health-cold");
+            break;
+          default:
+            label = status.toUpperCase();
+            badge.classList.add("health-cold");
+            break;
+        }
+
+        badge.textContent = label;
+      } catch (e) {
+        console.error("Error fetching health:", e);
+        badge.textContent = "ERROR";
+        badge.className = "badge health-stale";
+      }
+    }
+
+    async function initDashboard() {
+      await fetchConfig();
+      await fetchMetrics();
+      await fetchHealth();
+      setInterval(fetchMetrics, intervalSeconds * 1000);
+      setInterval(fetchHealth, intervalSeconds * 1000);
+      setInterval(updateLiveBadge, 1000);
+    }
+
+    initDashboard();
+  </script>
+</body>
+</html>

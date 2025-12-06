@@ -29,8 +29,8 @@ from dht_core import (
 # Basic Auth config
 # =========================
 
-BASIC_AUTH_USERNAME = "dhtuser"        # change if you like
-BASIC_AUTH_PASSWORD = "SuperSafe12345"  # change if you like
+BASIC_AUTH_USERNAME = "dhtadmin"          # change if you like
+BASIC_AUTH_PASSWORD = "SuperSafe123"  # change if you like
 BASIC_AUTH_REALM = "CPUNK DHT Monitor"
 
 app = FastAPI()

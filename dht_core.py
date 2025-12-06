@@ -340,6 +340,55 @@ def get_metrics_snapshot():
     return history_copy, top_copy
 
 
+def get_nodus_metrics(process_name: str = "dna-nodus"):
+    """
+    Inspect the dna-nodus process and return basic health metrics.
+
+    Returns a dict:
+      {
+        "nodus_running": 0/1,
+        "nodus_cpu_pct": float or None,
+        "nodus_mem_mb": float or None,
+        "nodus_uptime_seconds": float or None,
+      }
+    """
+    nodus_running = 0
+    cpu_pct = None
+    mem_mb = None
+    uptime_seconds = None
+
+    try:
+        for p in psutil.process_iter(["name", "cmdline", "create_time"]):
+            try:
+                name = p.info["name"] or ""
+                cmdline = " ".join(p.info["cmdline"] or [])
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+
+            if process_name in name or process_name in cmdline:
+                nodus_running = 1
+                # Instant snapshot; first call may be 0 until next sample
+                cpu_pct = p.cpu_percent(interval=0.0)
+                mem_mb = p.memory_info().rss / (1024 * 1024)
+
+                try:
+                    create_time = p.info.get("create_time") or p.create_time()
+                    uptime_seconds = time.time() - create_time
+                except Exception:
+                    uptime_seconds = None
+
+                break
+    except Exception as e:
+        logging.error("Error while collecting dna-nodus metrics: %s", e)
+
+    return {
+        "nodus_running": nodus_running,
+        "nodus_cpu_pct": cpu_pct,
+        "nodus_mem_mb": mem_mb,
+        "nodus_uptime_seconds": uptime_seconds,
+    }
+
+
 def get_health_info():
     """
     Compute health info used by /health.
@@ -374,7 +423,7 @@ def get_health_info():
         else:
             status = "idle"
 
-    return {
+    base = {
         "status": status,
         "points": points,
         "last_ts": last_ts,
@@ -383,3 +432,8 @@ def get_health_info():
         "age_seconds": age_seconds,
         "interval_seconds": INTERVAL_SECONDS,
     }
+
+    # Attach dna-nodus process metrics (for HEALTH tooltip)
+    base.update(get_nodus_metrics())
+
+    return base

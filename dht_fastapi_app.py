@@ -10,6 +10,14 @@ Responsibilities:
 
 import logging
 import socket
+import hashlib
+
+import os
+import secrets
+
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
@@ -48,6 +56,64 @@ app = FastAPI(
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
+security = HTTPBasic()
+
+security = HTTPBasic()
+
+def get_current_user(credentials: HTTPBasicCredentials = Depends(security)):
+    """
+    HTTP Basic auth for the whole DHT monitor.
+
+    Credentials source:
+      - DHT_MONITOR_USER          -> expected username (plaintext)
+      - DHT_MONITOR_PASS          -> expected password (PLAINTEXT, legacy)
+      - DHT_MONITOR_PASS_HASH     -> expected password SHA-256 hex (preferred)
+
+    Priority:
+      1. If DHT_MONITOR_PASS_HASH is set, we ONLY check against the hash.
+      2. Else if DHT_MONITOR_PASS is set, we check plaintext.
+      3. If neither is set (or no user), auth is disabled (allow all).
+    """
+    expected_user = os.environ.get("DHT_MONITOR_USER")
+    expected_pass = os.environ.get("DHT_MONITOR_PASS")
+    expected_hash = os.environ.get("DHT_MONITOR_PASS_HASH")
+
+    # If nothing configured, do NOT enforce auth (to avoid accidental lock-out)
+    if not expected_user or (not expected_pass and not expected_hash):
+      return "anonymous"
+
+    # Username check (plaintext, not really sensitive)
+    if not secrets.compare_digest(credentials.username, expected_user):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+
+    # Password check – prefer hash if configured
+    provided_password = credentials.password or ""
+
+    if expected_hash:
+        # SHA-256 hex comparison
+        candidate_hash = hashlib.sha256(provided_password.encode("utf-8")).hexdigest()
+        ok_pass = secrets.compare_digest(candidate_hash, expected_hash)
+    else:
+        # Legacy plaintext password comparison
+        ok_pass = secrets.compare_digest(provided_password, expected_pass)
+
+    if not ok_pass:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+
+    return credentials.username
+
+
+
+
+
 # ------------------------------------------------------------
 # Startup
 # ------------------------------------------------------------
@@ -73,7 +139,7 @@ def on_startup() -> None:
 # UI: serve index.html
 # ------------------------------------------------------------
 
-@app.get("/", include_in_schema=False)
+@app.get("/", include_in_schema=False, dependencies=[Depends(get_current_user)])
 async def serve_index():
     """
     Serve the main dashboard UI from static/index.html.
@@ -92,7 +158,7 @@ async def serve_index():
 # API: metrics
 # ------------------------------------------------------------
 
-@app.get("/metrics.json")
+@app.get("/metrics.json", dependencies=[Depends(get_current_user)])
 async def metrics() -> Dict[str, Any]:
     """
     Return current metrics history and top talkers.
@@ -114,7 +180,7 @@ async def metrics() -> Dict[str, Any]:
 # API: health (includes dna-nodus process info)
 # ------------------------------------------------------------
 
-@app.get("/health")
+@app.get("/health", dependencies=[Depends(get_current_user)])
 async def health() -> Dict[str, Any]:
     """
     Return overall monitor health plus dna-nodus process info.
@@ -131,7 +197,7 @@ async def health() -> Dict[str, Any]:
 # API: config.json (used by front-end UI)
 # ------------------------------------------------------------
 
-@app.get("/config.json")
+@app.get("/config.json", dependencies=[Depends(get_current_user)])
 async def config() -> Dict[str, Any]:
     """
     Return UI config:
@@ -167,7 +233,7 @@ async def config() -> Dict[str, Any]:
 # API: DB stats
 # ------------------------------------------------------------
 
-@app.get("/db_stats")
+@app.get("/db_stats", dependencies=[Depends(get_current_user)])
 async def db_stats() -> Dict[str, Any]:
     """
     Simple introspection endpoint for the SQLite store.

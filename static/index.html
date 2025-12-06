@@ -69,7 +69,6 @@
       color: #e5e7eb;
     }
 
-
     .spark-grid {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -105,8 +104,6 @@
       width: 100%;
       height: 60px;
     }
-
-
 
     .grid {
       display: grid;
@@ -291,7 +288,6 @@
       </div>
     </div>
 
-
     <div class="charts">
       <div class="chart-card">
         <div class="chart-title">Peers over time</div>
@@ -423,15 +419,19 @@
       trafficChart.update('none');
     }
 
+    // ---- Sparklines ----
 
-
-    function initSparklines(labels, cpuSeries, memSeries, diskSeries) {
+    function initSparklines(cpuSeries, memSeries, diskSeries) {
       const cpuCtx = document.getElementById('cpuSpark').getContext('2d');
       const memCtx = document.getElementById('memSpark').getContext('2d');
       const diskCtx = document.getElementById('diskSpark').getContext('2d');
 
+      const makeLabels = (len) => Array(len).fill("");
+
       const baseOptions = {
         responsive: true,
+        maintainAspectRatio: false,
+        layout: { padding: 0 },
         plugins: {
           legend: { display: false },
           tooltip: { enabled: true },
@@ -439,23 +439,25 @@
         scales: {
           x: {
             display: false,
+            grid: { display: false },
+            border: { display: false }
           },
           y: {
             display: false,
-            beginAtZero: true,
+            grid: { display: false },
+            border: { display: false }
           }
         },
         elements: {
-          point: {
-            radius: 0,
-          }
+          point: { radius: 0 },
+          line: { borderWidth: 2 }
         }
       };
 
       cpuSpark = new Chart(cpuCtx, {
         type: 'line',
         data: {
-          labels: labels,
+          labels: makeLabels(cpuSeries.length),
           datasets: [{
             data: cpuSeries,
             tension: 0.2,
@@ -467,7 +469,7 @@
       memSpark = new Chart(memCtx, {
         type: 'line',
         data: {
-          labels: labels,
+          labels: makeLabels(memSeries.length),
           datasets: [{
             data: memSeries,
             tension: 0.2,
@@ -479,7 +481,7 @@
       diskSpark = new Chart(diskCtx, {
         type: 'line',
         data: {
-          labels: labels,
+          labels: makeLabels(diskSeries.length),
           datasets: [{
             data: diskSeries,
             tension: 0.2,
@@ -491,25 +493,25 @@
       sparksInitialized = true;
     }
 
-    function updateSparklines(labels, cpuSeries, memSeries, diskSeries) {
+    function updateSparklines(cpuSeries, memSeries, diskSeries) {
       if (!cpuSpark || !memSpark || !diskSpark) return;
 
-      cpuSpark.data.labels = labels;
+      const makeLabels = (len) => Array(len).fill("");
+
+      cpuSpark.data.labels = makeLabels(cpuSeries.length);
       cpuSpark.data.datasets[0].data = cpuSeries;
       cpuSpark.update('none');
 
-      memSpark.data.labels = labels;
+      memSpark.data.labels = makeLabels(memSeries.length);
       memSpark.data.datasets[0].data = memSeries;
       memSpark.update('none');
 
-      diskSpark.data.labels = labels;
+      diskSpark.data.labels = makeLabels(diskSeries.length);
       diskSpark.data.datasets[0].data = diskSeries;
       diskSpark.update('none');
     }
 
-
-
-
+    // ---- Config & metrics ----
 
     async function fetchConfig() {
       try {
@@ -566,6 +568,7 @@
           return;
         }
 
+        // Labels / peers / traffic for the main charts
         const labels = history.map(h => {
           const ts = h.ts || "";
           if (!ts) return "";
@@ -576,31 +579,15 @@
         const peers = history.map(h => h.unique_peers || 0);
         const trafficKB = history.map(h => (h.total_bytes || 0) / 1024.0);
 
-        // System metric series for sparklines
-        const cpuSeries = history.map(h => {
-          const v = h.cpu_usage;
-          return (v === null || v === undefined) ? null : v;
-        });
-
+        // --- System metric series for sparklines ---
+        // DB always has these columns, so just map the full history.
+        const cpuSeries = history.map(h => h.cpu_usage);
         const memPctSeries = history.map(h => {
           const used = h.mem_used_mb;
-          const total = h.mem_total_mb;
-          if (
-            used === null || used === undefined ||
-            total === null || total === undefined ||
-            total <= 0
-          ) {
-            return null;
-          }
+          const total = h.mem_total_mb || 1;
           return (used / total) * 100.0;
         });
-
-        const diskSeries = history.map(h => {
-          const v = h.disk_used_pct;
-          return (v === null || v === undefined) ? null : v;
-        });
-
-
+        const diskSeries = history.map(h => h.disk_used_pct);
 
         const latest = history[history.length - 1];
 
@@ -615,10 +602,7 @@
         document.getElementById('metric-total-traffic').textContent =
           formatBytesToMB(totalBytes) + " MB";
 
-
-
-
-        // --- System metrics ---
+        // --- System metrics (numeric in cards) ---
 
         // CPU
         const cpu = latest.cpu_usage;
@@ -666,8 +650,6 @@
           document.getElementById('metric-disk-sub').textContent = "No data";
         }
 
-
-
         const maxPeers = Math.max(...peers);
         document.getElementById('metric-max-peers').textContent =
           "Max peers: " + maxPeers;
@@ -686,14 +668,12 @@
         }
 
         if (!sparksInitialized) {
-          initSparklines(labels, cpuSeries, memPctSeries, diskSeries);
+          initSparklines(cpuSeries, memPctSeries, diskSeries);
         } else {
-          updateSparklines(labels, cpuSeries, memPctSeries, diskSeries);
+          updateSparklines(cpuSeries, memPctSeries, diskSeries);
         }
 
         updateTopTalkers(latestTop);
-
-
 
       } catch (e) {
         console.error("Error fetching metrics:", e);

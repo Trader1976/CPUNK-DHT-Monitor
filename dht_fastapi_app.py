@@ -94,8 +94,10 @@ def get_current_user(credentials: HTTPBasicCredentials = Depends(security)):
     provided_password = credentials.password or ""
 
     if expected_hash:
-        # SHA-256 hex comparison
-        candidate_hash = hashlib.sha256(provided_password.encode("utf-8")).hexdigest()
+        # SHA3-512 hex comparison (post-quantum-friendly hash)
+        candidate_hash = hashlib.sha3_512(
+            provided_password.encode("utf-8")
+        ).hexdigest()
         ok_pass = secrets.compare_digest(candidate_hash, expected_hash)
     else:
         # Legacy plaintext password comparison

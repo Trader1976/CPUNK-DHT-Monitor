@@ -80,4 +80,5 @@ cpunk-dht-monitor/
 
 License
 
-MIT – free to use, fork, modify.
+MIT – free to use, fork, modify.<img width="1120" height="958" alt="Pasted image" src="https://github.com/user-attachments/assets/36bbdff1-9cc9-43bc-8fdd-5f85f0424b01" />
+

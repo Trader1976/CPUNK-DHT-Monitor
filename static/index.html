@@ -20,13 +20,16 @@
       margin: 0 auto;
       padding: 16px 16px 40px;
     }
+
     header {
       display: flex;
       justify-content: space-between;
-      align-items: center;
+      align-items: center; /* vertical centering of left + right columns */
       gap: 16px;
-      margin-bottom: 20px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
     }
+
     .title {
       font-size: 22px;
       font-weight: 700;
@@ -36,6 +39,14 @@
       color: #9ca3af;
       margin-top: 4px;
     }
+
+    .header-right {
+      display: flex;
+      align-items: center; /* vertically align timeframe + badges */
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
     .badge {
       font-size: 12px;
       padding: 4px 10px;
@@ -67,6 +78,41 @@
       background: #111827;
       border-color: #4b5563;
       color: #e5e7eb;
+    }
+
+    .badges {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* Timeframe selector */
+    .timeframe-switch {
+      display: flex;
+      align-items: center; /* label + buttons vertically centered */
+      gap: 6px;
+    }
+    .timeframe-label {
+      font-size: 11px;
+      color: #9ca3af;
+    }
+    .tf-btn {
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid #1f2937;
+      background: #020617;
+      color: #9ca3af;
+      cursor: pointer;
+      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    }
+    .tf-btn:hover {
+      border-color: #4b5563;
+    }
+    .tf-btn.active {
+      background: #0ea5e9;
+      border-color: #38bdf8;
+      color: #020617;
     }
 
     .spark-grid {
@@ -225,9 +271,20 @@
           Loading node info…
         </div>
       </div>
-      <div style="display:flex; gap:8px; align-items:center;">
-        <div class="badge health-cold" id="health-badge">COLD</div>
-        <div class="badge" id="live-badge">LIVE</div>
+
+      <div class="header-right">
+        <div class="timeframe-switch">
+          <span class="timeframe-label">Timeframe:</span>
+          <button class="tf-btn active" data-range="1h">1h</button>
+          <button class="tf-btn" data-range="6h">6h</button>
+          <button class="tf-btn" data-range="24h">24h</button>
+          <button class="tf-btn" data-range="7d">7d</button>
+        </div>
+
+        <div class="badges">
+          <div class="badge health-cold" id="health-badge">COLD</div>
+          <div class="badge" id="live-badge">LIVE</div>
+        </div>
       </div>
     </header>
 
@@ -333,12 +390,36 @@
     let diskSpark;
     let sparksInitialized = false;
 
+    // timeframe state
+    const TIMEFRAME_MS = {
+      "1h": 1 * 60 * 60 * 1000,
+      "6h": 6 * 60 * 60 * 1000,
+      "24h": 24 * 60 * 60 * 1000,
+      "7d": 7 * 24 * 60 * 60 * 1000
+    };
+    let currentTimeframe = "1h";
+    let lastHistory = [];
+    let lastLatestTop = [];
+
     function formatBytesToKB(bytes) {
       return (bytes / 1024).toFixed(1);
     }
 
     function formatBytesToMB(bytes) {
       return (bytes / (1024 * 1024)).toFixed(2);
+    }
+
+    function filterHistoryByTimeframe(history, timeframe) {
+      const ms = TIMEFRAME_MS[timeframe];
+      if (!ms) return history;
+      const cutoff = Date.now() - ms;
+      const filtered = history.filter(h => {
+        if (!h.ts) return false;
+        const t = Date.parse(h.ts);
+        if (isNaN(t)) return false;
+        return t >= cutoff;
+      });
+      return filtered;
     }
 
     function initCharts(labels, peers, trafficKB) {
@@ -511,7 +592,141 @@
       diskSpark.update('none');
     }
 
-    // ---- Config & metrics ----
+    // ---- Rendering from history ----
+
+    function renderMetrics(history, latestTop) {
+      const dataPointsEl = document.getElementById('metric-data-points');
+
+      if (!history || history.length === 0) {
+        dataPointsEl.textContent = "Data points: 0";
+        document.getElementById('metric-current-peers').textContent = "0";
+        document.getElementById('metric-current-traffic').textContent = "0 KB";
+        document.getElementById('metric-total-traffic').textContent = "0 MB";
+        document.getElementById('metric-max-peers').textContent = "Max peers: –";
+        document.getElementById('metric-max-traffic').textContent = "Peak window: –";
+        updateTopTalkers([]);
+        return;
+      }
+
+      // Apply timeframe
+      let visibleHistory = filterHistoryByTimeframe(history, currentTimeframe);
+      if (visibleHistory.length === 0) {
+        visibleHistory = history.slice();
+      }
+
+      dataPointsEl.textContent = "Data points: " + visibleHistory.length;
+
+      // Labels / peers / traffic for visible window
+      const labels = visibleHistory.map(h => {
+        const ts = h.ts || "";
+        if (!ts) return "";
+        const t = ts.split("T")[1] || "";
+        return t.slice(0, 5);
+      });
+
+      const peers = visibleHistory.map(h => h.unique_peers || 0);
+      const trafficKB = visibleHistory.map(h => (h.total_bytes || 0) / 1024.0);
+
+      // System metric series for sparklines (visible window)
+      const cpuSeries = visibleHistory.map(h => h.cpu_usage);
+      const memPctSeries = visibleHistory.map(h => {
+        const used = h.mem_used_mb;
+        const total = h.mem_total_mb || 1;
+        return (used / total) * 100.0;
+      });
+      const diskSeries = visibleHistory.map(h => h.disk_used_pct);
+
+      // Latest sample always from full history
+      const latest = history[history.length - 1];
+
+      document.getElementById('metric-current-peers').textContent =
+        latest.unique_peers || 0;
+
+      const lastKB = latest.total_bytes ? formatBytesToKB(latest.total_bytes) : "0.0";
+      document.getElementById('metric-current-traffic').textContent =
+        lastKB + " KB";
+
+      // Total traffic over full history (all time)
+      const totalBytes = history.reduce((acc, h) => acc + (h.total_bytes || 0), 0);
+      document.getElementById('metric-total-traffic').textContent =
+        formatBytesToMB(totalBytes) + " MB";
+
+      // --- System metrics in cards (latest) ---
+
+      // CPU
+      const cpu = latest.cpu_usage;
+      if (cpu !== undefined && cpu !== null) {
+        document.getElementById('metric-cpu').textContent =
+          cpu.toFixed(1) + " %";
+      } else {
+        document.getElementById('metric-cpu').textContent = "–";
+      }
+
+      // Memory
+      const memUsedMb = latest.mem_used_mb;
+      const memTotalMb = latest.mem_total_mb;
+      if (
+        memUsedMb !== undefined && memUsedMb !== null &&
+        memTotalMb !== undefined && memTotalMb !== null &&
+        memTotalMb > 0
+      ) {
+        const memPct = (memUsedMb / memTotalMb) * 100;
+        document.getElementById('metric-mem').textContent =
+          memPct.toFixed(1) + " %";
+        document.getElementById('metric-mem-sub').textContent =
+          memUsedMb.toFixed(0) + " / " + memTotalMb.toFixed(0) + " MB";
+      } else {
+        document.getElementById('metric-mem').textContent = "–";
+        document.getElementById('metric-mem-sub').textContent = "No data";
+      }
+
+      // Disk
+      const diskPct = latest.disk_used_pct;
+      const diskUsedGb = latest.disk_used_gb;
+      const diskFreeGb = latest.disk_free_gb;
+      if (
+        diskPct !== undefined && diskPct !== null &&
+        diskUsedGb !== undefined && diskUsedGb !== null &&
+        diskFreeGb !== undefined && diskFreeGb !== null
+      ) {
+        document.getElementById('metric-disk').textContent =
+          diskPct.toFixed(1) + " %";
+        document.getElementById('metric-disk-sub').textContent =
+          diskUsedGb.toFixed(1) + " used / " +
+          diskFreeGb.toFixed(1) + " free GB";
+      } else {
+        document.getElementById('metric-disk').textContent = "–";
+        document.getElementById('metric-disk-sub').textContent = "No data";
+      }
+
+      // Max peers / traffic in visible window
+      const maxPeers = Math.max(...peers);
+      document.getElementById('metric-max-peers').textContent =
+        "Max peers: " + maxPeers;
+
+      const maxBytes = visibleHistory.reduce(
+        (max, h) => Math.max(max, h.total_bytes || 0),
+        0
+      );
+      document.getElementById('metric-max-traffic').textContent =
+        "Peak window: " + formatBytesToKB(maxBytes) + " KB";
+
+      if (!chartsInitialized) {
+        initCharts(labels, peers, trafficKB);
+      } else {
+        updateCharts(labels, peers, trafficKB);
+      }
+
+      if (!sparksInitialized) {
+        initSparklines(cpuSeries, memPctSeries, diskSeries);
+      } else {
+        updateSparklines(cpuSeries, memPctSeries, diskSeries);
+      }
+
+      updateTopTalkers(latestTop);
+    }
+
+    // ---- Config, fetch & health ----
 
     async function fetchConfig() {
       try {
@@ -555,126 +770,11 @@
         const history = data.history || [];
         const latestTop = data.latest_top || [];
 
-        document.getElementById('metric-data-points').textContent =
-          "Data points: " + history.length;
+        // cache for timeframe switching
+        lastHistory = history;
+        lastLatestTop = latestTop;
 
-        if (history.length === 0) {
-          document.getElementById('metric-current-peers').textContent = "0";
-          document.getElementById('metric-current-traffic').textContent = "0 KB";
-          document.getElementById('metric-total-traffic').textContent = "0 MB";
-          document.getElementById('metric-max-peers').textContent = "Max peers: –";
-          document.getElementById('metric-max-traffic').textContent = "Peak window: –";
-          updateTopTalkers([]);
-          return;
-        }
-
-        // Labels / peers / traffic for the main charts
-        const labels = history.map(h => {
-          const ts = h.ts || "";
-          if (!ts) return "";
-          const t = ts.split("T")[1] || "";
-          return t.slice(0, 5);
-        });
-
-        const peers = history.map(h => h.unique_peers || 0);
-        const trafficKB = history.map(h => (h.total_bytes || 0) / 1024.0);
-
-        // --- System metric series for sparklines ---
-        // DB always has these columns, so just map the full history.
-        const cpuSeries = history.map(h => h.cpu_usage);
-        const memPctSeries = history.map(h => {
-          const used = h.mem_used_mb;
-          const total = h.mem_total_mb || 1;
-          return (used / total) * 100.0;
-        });
-        const diskSeries = history.map(h => h.disk_used_pct);
-
-        const latest = history[history.length - 1];
-
-        document.getElementById('metric-current-peers').textContent =
-          latest.unique_peers || 0;
-
-        const lastKB = latest.total_bytes ? formatBytesToKB(latest.total_bytes) : "0.0";
-        document.getElementById('metric-current-traffic').textContent =
-          lastKB + " KB";
-
-        const totalBytes = history.reduce((acc, h) => acc + (h.total_bytes || 0), 0);
-        document.getElementById('metric-total-traffic').textContent =
-          formatBytesToMB(totalBytes) + " MB";
-
-        // --- System metrics (numeric in cards) ---
-
-        // CPU
-        const cpu = latest.cpu_usage;
-        if (cpu !== undefined && cpu !== null) {
-          document.getElementById('metric-cpu').textContent =
-            cpu.toFixed(1) + " %";
-        } else {
-          document.getElementById('metric-cpu').textContent = "–";
-        }
-
-        // Memory
-        const memUsedMb = latest.mem_used_mb;
-        const memTotalMb = latest.mem_total_mb;
-        if (
-          memUsedMb !== undefined && memUsedMb !== null &&
-          memTotalMb !== undefined && memTotalMb !== null &&
-          memTotalMb > 0
-        ) {
-          const memPct = (memUsedMb / memTotalMb) * 100;
-          document.getElementById('metric-mem').textContent =
-            memPct.toFixed(1) + " %";
-          document.getElementById('metric-mem-sub').textContent =
-            memUsedMb.toFixed(0) + " / " + memTotalMb.toFixed(0) + " MB";
-        } else {
-          document.getElementById('metric-mem').textContent = "–";
-          document.getElementById('metric-mem-sub').textContent = "No data";
-        }
-
-        // Disk
-        const diskPct = latest.disk_used_pct;
-        const diskUsedGb = latest.disk_used_gb;
-        const diskFreeGb = latest.disk_free_gb;
-        if (
-          diskPct !== undefined && diskPct !== null &&
-          diskUsedGb !== undefined && diskUsedGb !== null &&
-          diskFreeGb !== undefined && diskFreeGb !== null
-        ) {
-          document.getElementById('metric-disk').textContent =
-            diskPct.toFixed(1) + " %";
-          document.getElementById('metric-disk-sub').textContent =
-            diskUsedGb.toFixed(1) + " used / " +
-            diskFreeGb.toFixed(1) + " free GB";
-        } else {
-          document.getElementById('metric-disk').textContent = "–";
-          document.getElementById('metric-disk-sub').textContent = "No data";
-        }
-
-        const maxPeers = Math.max(...peers);
-        document.getElementById('metric-max-peers').textContent =
-          "Max peers: " + maxPeers;
-
-        const maxBytes = history.reduce(
-          (max, h) => Math.max(max, h.total_bytes || 0),
-          0
-        );
-        document.getElementById('metric-max-traffic').textContent =
-          "Peak window: " + formatBytesToKB(maxBytes) + " KB";
-
-        if (!chartsInitialized) {
-          initCharts(labels, peers, trafficKB);
-        } else {
-          updateCharts(labels, peers, trafficKB);
-        }
-
-        if (!sparksInitialized) {
-          initSparklines(cpuSeries, memPctSeries, diskSeries);
-        } else {
-          updateSparklines(cpuSeries, memPctSeries, diskSeries);
-        }
-
-        updateTopTalkers(latestTop);
-
+        renderMetrics(history, latestTop);
       } catch (e) {
         console.error("Error fetching metrics:", e);
       }
@@ -779,7 +879,24 @@
       }
     }
 
+    function setupTimeframeButtons() {
+      const buttons = document.querySelectorAll('.tf-btn');
+      buttons.forEach(btn => {
+        btn.addEventListener('click', () => {
+          const tf = btn.dataset.range;
+          if (!tf || tf === currentTimeframe) return;
+          currentTimeframe = tf;
+          buttons.forEach(b => b.classList.toggle('active', b === btn));
+
+          if (lastHistory.length > 0) {
+            renderMetrics(lastHistory, lastLatestTop);
+          }
+        });
+      });
+    }
+
     async function initDashboard() {
+      setupTimeframeButtons();
       await fetchConfig();
       await fetchMetrics();
       await fetchHealth();

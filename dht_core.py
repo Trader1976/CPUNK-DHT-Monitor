@@ -15,8 +15,8 @@ from pathlib import Path
 # =========================
 
 DHT_PORT = 4000                 # UDP port used by dna-nodus
-CAPTURE_SECONDS = 1            # how long each tshark capture runs
-INTERVAL_SECONDS = 1           # how often we start a new capture window
+CAPTURE_SECONDS = 60            # how long each tshark capture runs
+INTERVAL_SECONDS = 60           # how often we start a new capture window
 LISTEN_INTERFACE = "any"        # tshark interface ("any" is usually fine)
 MAX_POINTS = 1440               # max in-memory points (e.g. 1440 @ 1/min ~= 24h)
 

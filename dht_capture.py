@@ -6,6 +6,7 @@ Responsibilities:
 - Parse UDP packets on the DHT port
 - Classify packets as inbound vs outbound based on local IPs
 - Aggregate traffic per source IP
+- Compute peer churn (new / expired peers vs previous window)
 - Build a "window" dict with DHT + system metrics
 - Push into in-memory metrics + SQLite
 """
@@ -32,6 +33,9 @@ from dht_system import get_system_metrics, get_local_ipv4_addresses
 # Precompute local IPs used for direction classification
 LOCAL_IPS = get_local_ipv4_addresses(LISTEN_INTERFACE)
 logging.info("Local IPv4 addresses used for IN/OUT detection: %s", ", ".join(LOCAL_IPS) or "none")
+
+# Keep track of peers between windows for churn calculation
+PREVIOUS_PEERS = set()
 
 
 def run_capture() -> List[Tuple[str, str, int]]:
@@ -118,9 +122,12 @@ def capture_loop() -> None:
     - Captures DHT packets for CAPTURE_SECONDS
     - Classifies inbound vs outbound based on local IPs
     - Aggregates per-window stats
+    - Computes peer churn (new / expired peers vs previous window)
     - Attaches system metrics
     - Stores to in-memory history + SQLite
     """
+    global PREVIOUS_PEERS
+
     while True:
         window_start = datetime.now(timezone.utc)
         logging.info("Starting capture window at %s", window_start.isoformat())
@@ -161,7 +168,16 @@ def capture_loop() -> None:
             peer_stats[src_ip]["bytes"] += length
             peer_stats[src_ip]["packets"] += 1
 
-        unique_peers = len(peer_stats)
+        # Peer count
+        current_peers = set(peer_stats.keys())
+        unique_peers = len(current_peers)
+
+        # Peer churn vs previous window
+        new_peers = len(current_peers - PREVIOUS_PEERS)
+        expired_peers = len(PREVIOUS_PEERS - current_peers)
+
+        # Update for next window
+        PREVIOUS_PEERS = current_peers
 
         # Sort "top talkers" by bytes desc (still per source IP)
         top_peers = sorted(
@@ -182,6 +198,8 @@ def capture_loop() -> None:
             "out_bytes": out_bytes,
             "in_packets": in_packets,
             "out_packets": out_packets,
+            "new_peers": new_peers,
+            "expired_peers": expired_peers,
             "top_peers": [
                 {
                     "ip": ip,
@@ -203,7 +221,8 @@ def capture_loop() -> None:
         logging.info(
             "Capture done: %d unique peers, %d packets, %d bytes "
             "in last %d seconds on UDP port %d "
-            "(IN: %d bytes / %d pkts, OUT: %d bytes / %d pkts)",
+            "(IN: %d bytes / %d pkts, OUT: %d bytes / %d pkts, "
+            "churn: +%d / -%d)",
             unique_peers,
             total_packets,
             total_bytes,
@@ -213,6 +232,8 @@ def capture_loop() -> None:
             in_packets,
             out_bytes,
             out_packets,
+            new_peers,
+            expired_peers,
         )
 
         # Sleep so that windows align roughly to INTERVAL_SECONDS

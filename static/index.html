@@ -383,6 +383,9 @@
         </div>
         <div class="metric-value" id="metric-current-peers">0</div>
         <div class="metric-sub" id="metric-max-peers">Max peers: &ndash;</div>
+        <div class="metric-sub" id="metric-churn" title="Peer churn in the last capture window (compared to the previous one).">
+          Churn: &ndash;
+        </div>
       </div>
       <div class="card">
         <div class="metric-label" title="Traffic volume in the last capture window (bytes observed on UDP port 4000).">
@@ -812,6 +815,7 @@
         document.getElementById('metric-total-traffic').textContent = "0 MB";
         document.getElementById('metric-max-peers').textContent = "Max peers: –";
         document.getElementById('metric-max-traffic').textContent = "Peak window: –";
+        document.getElementById('metric-churn').textContent = "Churn: –";
         updateTopTalkers([]);
         return;
       }
@@ -941,14 +945,14 @@
         document.getElementById('metric-disk-sub').textContent = "No data";
       }
 
-      // Max peers / traffic in visible window
+      // Max peers in visible window
       const maxPeers = Math.max(...peers);
       document.getElementById('metric-max-peers').textContent =
         "Max peers: " + maxPeers;
 
+      // Peak traffic (IN+OUT if available)
       const maxBytes = visibleHistory.reduce(
         (max, h) => {
-          // Prefer in+out if available; else total_bytes
           if (typeof h.in_bytes === "number" || typeof h.out_bytes === "number") {
             const sum = (h.in_bytes || 0) + (h.out_bytes || 0);
             return Math.max(max, sum);
@@ -959,6 +963,19 @@
       );
       document.getElementById('metric-max-traffic').textContent =
         "Peak window: " + formatBytesToKB(maxBytes) + " KB";
+
+      // Peer churn (last window)
+      const newPeers = typeof latest.new_peers === "number" ? latest.new_peers : null;
+      const expiredPeers = typeof latest.expired_peers === "number" ? latest.expired_peers : null;
+
+      if (newPeers !== null || expiredPeers !== null) {
+        const plus = newPeers !== null ? `+${newPeers}` : "+–";
+        const minus = expiredPeers !== null ? `-${expiredPeers}` : "-–";
+        document.getElementById('metric-churn').textContent =
+          `Churn: ${plus} / ${minus}`;
+      } else {
+        document.getElementById('metric-churn').textContent = "Churn: –";
+      }
 
       if (!chartsInitialized) {
         initCharts(labels, peers, inboundKB, outboundKB);

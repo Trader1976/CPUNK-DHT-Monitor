@@ -1,3 +1,4 @@
+<img width="1120" height="958" alt="Pasted image" src="https://github.com/user-attachments/assets/fe670212-b1db-402c-beba-c443eadd5d0d" />
 # CPUNK DHT Monitor
 
 A lightweight, real-time monitoring dashboard for CPUNK DHT bootstrap nodes and DNA-Messenger infrastructure.  

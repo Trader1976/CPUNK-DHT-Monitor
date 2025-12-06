@@ -1,144 +1,198 @@
 #!/usr/bin/env python3
-import threading
+"""
+FastAPI web backend for the CPUNK DHT Monitor.
+
+Responsibilities:
+- Serve the static dashboard UI (static/index.html)
+- Expose JSON endpoints for metrics, health, config, and DB stats
+- Start the background capture thread on startup
+"""
+
 import logging
 import socket
-import secrets
 from pathlib import Path
+from typing import Any, Dict, Tuple
 
-from fastapi import FastAPI, Depends, HTTPException, status
-from fastapi.responses import HTMLResponse, FileResponse
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi import FastAPI
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-import uvicorn
 
 from dht_core import (
-    DHT_PORT,
-    INTERVAL_SECONDS,
-    LISTEN_INTERFACE,
+    # Config / constants
     HTTP_HOST,
     HTTP_PORT,
+    DHT_PORT,
+    LISTEN_INTERFACE,
+    INTERVAL_SECONDS,
+    # Core API
     setup_logging,
     init_db,
-    capture_loop,
+    start_capture_thread,
     get_metrics_snapshot,
     get_health_info,
     get_db_stats,
 )
 
-# =========================
-# Basic Auth config
-# =========================
-
-BASIC_AUTH_USERNAME = "dhtadmin"          # change if you like
-BASIC_AUTH_PASSWORD = "SuperSafe123"  # change if you like
-BASIC_AUTH_REALM = "CPUNK DHT Monitor"
-
-app = FastAPI()
-security = HTTPBasic()
-
+# Base paths
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
+INDEX_HTML = STATIC_DIR / "index.html"
 
-# Mount /static for any future assets (images, separate JS, etc.)
+app = FastAPI(
+    title="CPUNK DHT Monitor",
+    version="0.2.0",
+    description="Monitoring application for CPUNK DNA-Nodus / DHT bootstrap nodes.",
+)
+
+# Serve /static/... for assets (JS, CSS, images if you add them later)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
-# =========================
-# Auth helper
-# =========================
+# ------------------------------------------------------------
+# Startup
+# ------------------------------------------------------------
 
-def get_current_user(credentials: HTTPBasicCredentials = Depends(security)) -> str:
-    """FastAPI dependency for HTTP Basic Auth."""
+@app.on_event("startup")
+def on_startup() -> None:
+    """
+    Initialize logging, database, and start the capture thread.
+    """
+    setup_logging()
+    logging.info("Starting CPUNK DHT Monitor FastAPI application")
 
-    correct_username = secrets.compare_digest(credentials.username, BASIC_AUTH_USERNAME)
-    correct_password = secrets.compare_digest(credentials.password, BASIC_AUTH_PASSWORD)
+    # Initialize SQLite
+    init_db()
+    logging.info("SQLite database initialized")
 
-    if not (correct_username and correct_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required",
-            headers={"WWW-Authenticate": f'Basic realm="{BASIC_AUTH_REALM}"'},
+    # Start tshark capture thread
+    start_capture_thread()
+    logging.info("Background capture thread started")
+
+
+# ------------------------------------------------------------
+# UI: serve index.html
+# ------------------------------------------------------------
+
+@app.get("/", include_in_schema=False)
+async def serve_index():
+    """
+    Serve the main dashboard UI from static/index.html.
+    """
+    if not INDEX_HTML.exists():
+        logging.error("index.html not found at %s", INDEX_HTML)
+        return JSONResponse(
+            status_code=500,
+            content={"error": "index.html not found", "path": str(INDEX_HTML)},
         )
 
-    return credentials.username
+    return FileResponse(str(INDEX_HTML))
 
 
-# =========================
-# Routes
-# =========================
+# ------------------------------------------------------------
+# API: metrics
+# ------------------------------------------------------------
 
-@app.get("/", response_class=HTMLResponse)
-async def index(user: str = Depends(get_current_user)):
-    """Serve the static dashboard HTML (protected by Basic Auth)."""
-    index_path = STATIC_DIR / "index.html"
-    return FileResponse(index_path)
+@app.get("/metrics.json")
+async def metrics() -> Dict[str, Any]:
+    """
+    Return current metrics history and top talkers.
 
-
-@app.get("/config.json")
-async def config(user: str = Depends(get_current_user)):
-    """Small config endpoint so the static UI knows hostname/port/interval/iface."""
+    Response schema:
+    {
+      "history": [ { ts, unique_peers, total_bytes, total_packets, ... }, ... ],
+      "latest_top": [ { ip, bytes, packets }, ... ]
+    }
+    """
+    history, latest_top = get_metrics_snapshot()
     return {
-        "hostname": socket.gethostname(),
-        "port": DHT_PORT,
-        "interval_seconds": INTERVAL_SECONDS,
-        "iface": LISTEN_INTERFACE,
+        "history": history,
+        "latest_top": latest_top,
     }
 
 
-@app.get("/metrics.json")
-async def metrics_json(user: str = Depends(get_current_user)):
-    """Main metrics endpoint (same JSON as before)."""
-    history, top = get_metrics_snapshot()
-    return {"history": history, "latest_top": top}
-
+# ------------------------------------------------------------
+# API: health (includes dna-nodus process info)
+# ------------------------------------------------------------
 
 @app.get("/health")
-async def health():
+async def health() -> Dict[str, Any]:
     """
-    Health endpoint.
+    Return overall monitor health plus dna-nodus process info.
 
-    NOTE: This one is intentionally NOT protected,
-    so externals / uptime checkers can hit it.
+    The underlying dht_core.get_health_info() already merges:
+      - status / points / last_ts / last_bytes / age_seconds / interval_seconds
+      - nodus_running / nodus_cpu_pct / nodus_mem_mb / nodus_uptime_seconds
     """
     info = get_health_info()
     return info
 
 
-@app.get("/db_stats")
-async def db_stats(user: str = Depends(get_current_user)):
-    """SQLite stats (rows, oldest/newest record). Protected by Basic Auth."""
-    rows, oldest, newest = get_db_stats()
+# ------------------------------------------------------------
+# API: config.json (used by front-end UI)
+# ------------------------------------------------------------
+
+@app.get("/config.json")
+async def config() -> Dict[str, Any]:
+    """
+    Return UI config:
+
+    {
+      "hostname": "<this host>",
+      "port": <DHT UDP port>,
+      "iface": "<capture interface>",
+      "interval_seconds": <capture interval>,
+      "http_host": "<HTTP bind host>",
+      "http_port": <HTTP bind port>
+    }
+
+    The index.html currently uses hostname, port, iface, interval_seconds.
+    Extra fields (http_host, http_port) are just informational.
+    """
+    try:
+      hostname = socket.gethostname()
+    except Exception:
+      hostname = "unknown"
+
     return {
-        "rows": rows,
-        "oldest_ts": oldest,
-        "newest_ts": newest,
+        "hostname": hostname,
+        "port": DHT_PORT,
+        "iface": LISTEN_INTERFACE,
+        "interval_seconds": INTERVAL_SECONDS,
+        "http_host": HTTP_HOST,
+        "http_port": HTTP_PORT,
     }
 
 
-# =========================
-# Startup hook
-# =========================
+# ------------------------------------------------------------
+# API: DB stats
+# ------------------------------------------------------------
 
-@app.on_event("startup")
-def on_startup():
-    """Runs once when FastAPI process starts."""
-    setup_logging()
-    init_db()
+@app.get("/db_stats")
+async def db_stats() -> Dict[str, Any]:
+    """
+    Simple introspection endpoint for the SQLite store.
 
-    t = threading.Thread(target=capture_loop, daemon=True)
-    t.start()
+    {
+      "rows": <int>,
+      "oldest_ts": "2025-12-06T00:00:00+00:00" | null,
+      "newest_ts": "2025-12-06T11:20:00+00:00" | null
+    }
+    """
+    rows, oldest_ts, newest_ts = get_db_stats()
+    return {
+        "rows": rows,
+        "oldest_ts": oldest_ts,
+        "newest_ts": newest_ts,
+    }
 
-    logging.info(
-        "Starting CPUNK DHT Monitor (FastAPI static UI) on %s:%d (DHT port %d)",
-        HTTP_HOST, HTTP_PORT, DHT_PORT,
-    )
 
-
-# =========================
-# Manual run
-# =========================
+# ------------------------------------------------------------
+# Dev entrypoint (for running directly: python dht_fastapi_app.py)
+# ------------------------------------------------------------
 
 if __name__ == "__main__":
+    import uvicorn
+
     uvicorn.run(
         "dht_fastapi_app:app",
         host=HTTP_HOST,

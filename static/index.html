@@ -420,7 +420,7 @@
       </div>
     </div>
 
-    <div class="grid">
+    <div class="grid grid-4">
       <div class="card">
         <div class="metric-label" title="Overall system CPU usage on this host.">
           CPU usage
@@ -441,6 +441,13 @@
         </div>
         <div class="metric-value" id="metric-disk">–</div>
         <div class="metric-sub" id="metric-disk-sub">–</div>
+      </div>
+      <div class="card">
+        <div class="metric-label" title="Estimated throughput in the last capture window based on inbound/outbound bytes and packets.">
+          Throughput (last window)
+        </div>
+        <div class="metric-value" id="metric-throughput">–</div>
+        <div class="metric-sub" id="metric-throughput-sub">–</div>
       </div>
     </div>
 
@@ -853,18 +860,23 @@
     function renderMetrics(history, latestTop) {
       const dataPointsEl = document.getElementById('metric-data-points');
 
-      if (!history || history.length === 0) {
-        dataPointsEl.textContent = "Data points: 0";
-        document.getElementById('metric-current-peers').textContent = "0";
-        document.getElementById('metric-current-traffic').textContent = "0 KB";
-        document.getElementById('metric-total-traffic').textContent = "0 MB";
-        document.getElementById('metric-max-peers').textContent = "Max peers: –";
-        document.getElementById('metric-max-traffic').textContent = "Peak window: –";
-        document.getElementById('metric-churn').textContent = "Churn: –";
-        updateTopTalkers([]);
-        return;
-      }
+    if (!history || history.length === 0) {
+      dataPointsEl.textContent = "Data points: 0";
+      document.getElementById('metric-current-peers').textContent = "0";
+      document.getElementById('metric-current-traffic').textContent = "0 KB";
+      document.getElementById('metric-total-traffic').textContent = "0 MB";
+      document.getElementById('metric-max-peers').textContent = "Max peers: –";
+      document.getElementById('metric-max-traffic').textContent = "Peak window: –";
+      document.getElementById('metric-churn').textContent = "Churn: –";
 
+      const thr = document.getElementById('metric-throughput');
+      const thrSub = document.getElementById('metric-throughput-sub');
+      if (thr) thr.textContent = "–";
+      if (thrSub) thrSub.textContent = "–";
+ 
+      updateTopTalkers([]);
+      return;
+    }
       // Apply timeframe (same as export will use)
       let visibleHistory = getVisibleHistory();
       dataPointsEl.textContent = "Data points: " + visibleHistory.length;
@@ -985,6 +997,52 @@
         document.getElementById('metric-disk').textContent = "–";
         document.getElementById('metric-disk-sub').textContent = "No data";
       }
+
+    // Throughput (last window) – KB/s in/out + packets/s
+    (function updateThroughputCard() {
+      const thr = document.getElementById('metric-throughput');
+      const thrSub = document.getElementById('metric-throughput-sub');
+      if (!thr || !thrSub) return;
+
+      const windowSec = intervalSeconds || 60;
+
+      // Prefer per-direction metrics if available
+      const inBytesWin = (typeof latest.in_bytes === "number")
+        ? latest.in_bytes
+        : (latest.total_bytes || 0);
+
+      const outBytesWin = (typeof latest.out_bytes === "number")
+        ? latest.out_bytes
+        : 0;
+
+       // Packets: prefer total_packets, else sum in/out if you ever add them
+       let totalPacketsWin;
+       if (typeof latest.total_packets === "number") {
+        totalPacketsWin = latest.total_packets;
+      } else {
+        const inP = typeof latest.in_packets === "number" ? latest.in_packets : 0;
+        const outP = typeof latest.out_packets === "number" ? latest.out_packets : 0;
+        totalPacketsWin = inP + outP;
+      }
+
+      if (!windowSec || windowSec <= 0) {
+        thr.textContent = "–";
+        thrSub.textContent = "–";
+        return;
+      }
+
+      const inKBs = inBytesWin / 1024.0 / windowSec;
+      const outKBs = outBytesWin / 1024.0 / windowSec;
+      const pps = totalPacketsWin / windowSec;
+
+      thr.textContent = `${inKBs.toFixed(1)} / ${outKBs.toFixed(1)} KB/s`;
+      thrSub.textContent = `${pps.toFixed(1)} packets/s`;
+    })();
+
+
+
+
+
 
       // Max peers in visible window
       const maxPeers = Math.max(...peers);

@@ -232,6 +232,21 @@
         grid-template-columns: minmax(0, 1fr);
       }
     }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    @media (max-width: 800px) {
+      .grid-2 {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+
+
     .card {
       background: radial-gradient(circle at top left, #0b1120 0, #020617 50%, #000 100%);
       border-radius: 16px;
@@ -283,7 +298,7 @@
 
     /* Only main charts (Peers / Traffic) */
     .charts canvas {
-      height: 520px;
+      height: 390px !important;
     }
 
     .table-card {
@@ -420,7 +435,7 @@
       </div>
     </div>
 
-    <div class="grid grid-4">
+    <div class="grid">
       <div class="card">
         <div class="metric-label" title="Overall system CPU usage on this host.">
           CPU usage
@@ -442,6 +457,9 @@
         <div class="metric-value" id="metric-disk">–</div>
         <div class="metric-sub" id="metric-disk-sub">–</div>
       </div>
+    </div>
+    
+    <div class="grid-2">
       <div class="card">
         <div class="metric-label" title="Estimated throughput in the last capture window based on inbound/outbound bytes and packets.">
           Throughput (last window)
@@ -449,14 +467,22 @@
         <div class="metric-value" id="metric-throughput">–</div>
         <div class="metric-sub" id="metric-throughput-sub">–</div>
       </div>
+    
+      <div class="spark-card">
+        <div class="spark-title">Throughput KB/s trend</div>
+        <div class="spark-wrapper">
+          <canvas id="throughputSpark"></canvas>
+        </div>
+      </div>
     </div>
+
 
     <div class="spark-grid">
       <div class="spark-card">
         <div class="spark-title">CPU % trend</div>
         <div class="spark-wrapper">
           <canvas id="cpuSpark"></canvas>
-        </div>
+       </div>
       </div>
       <div class="spark-card">
         <div class="spark-title">RAM % trend</div>
@@ -526,6 +552,7 @@
     let intervalSeconds = 60; // will be updated from /config.json
     let peersChart;
     let trafficChart;
+    let throughputSpark;
     let chartsInitialized = false;
 
     let lastFetchOk = 0;
@@ -628,7 +655,7 @@
         },
         options: {
           responsive: true,
-          aspectRatio: 1.2,
+          aspectRatio: false, //1.2,
           interaction: {
             mode: "index",
             intersect: false
@@ -682,7 +709,7 @@
         },
         options: {
           responsive: true,
-          aspectRatio: 1.2,
+          aspectRatio: false, //1.2,
           interaction: {
             mode: "index",
             intersect: false
@@ -736,15 +763,16 @@
 
     // ---- Sparklines ----
 
-    function initSparklines(cpuSeries, memSeries, diskSeries, labels) {
+    function initSparklines(cpuSeries, memSeries, diskSeries, throughputSeries, labels) {
       const cpuCtx = document.getElementById('cpuSpark').getContext('2d');
       const memCtx = document.getElementById('memSpark').getContext('2d');
       const diskCtx = document.getElementById('diskSpark').getContext('2d');
-
+      const thrCtx = document.getElementById('throughputSpark').getContext('2d');
+    
       const xLabels = labels && labels.length === cpuSeries.length
         ? labels
         : Array(cpuSeries.length).fill("");
-
+    
       const baseOptions = {
         responsive: true,
         maintainAspectRatio: false,
@@ -765,6 +793,9 @@
                 }
                 if (id === "diskSpark") {
                   return `Disk: ${value.toFixed(1)}%`;
+                }
+                if (id === "throughputSpark") {
+                  return `Throughput: ${value.toFixed(1)} KB/s`;
                 }
                 return value;
               },
@@ -795,7 +826,7 @@
           line: { borderWidth: 2 }
         }
       };
-
+    
       cpuSpark = new Chart(cpuCtx, {
         type: 'line',
         data: {
@@ -807,7 +838,7 @@
         },
         options: baseOptions
       });
-
+    
       memSpark = new Chart(memCtx, {
         type: 'line',
         data: {
@@ -819,7 +850,7 @@
         },
         options: baseOptions
       });
-
+    
       diskSpark = new Chart(diskCtx, {
         type: 'line',
         data: {
@@ -831,29 +862,50 @@
         },
         options: baseOptions
       });
-
+    
+      throughputSpark = new Chart(thrCtx, {
+        type: 'line',
+        data: {
+          labels: xLabels,
+          datasets: [{
+            data: throughputSeries,
+            tension: 0.2,
+          }]
+        },
+        options: baseOptions
+      });
+    
       sparksInitialized = true;
     }
 
-    function updateSparklines(cpuSeries, memSeries, diskSeries, labels) {
-      if (!cpuSpark || !memSpark || !diskSpark) return;
 
+
+    function updateSparklines(cpuSeries, memSeries, diskSeries, throughputSeries, labels) {
+      if (!cpuSpark || !memSpark || !diskSpark || !throughputSpark) return;
+    
       const xLabels = labels && labels.length === cpuSeries.length
         ? labels
         : Array(cpuSeries.length).fill("");
-
+    
       cpuSpark.data.labels = xLabels;
       cpuSpark.data.datasets[0].data = cpuSeries;
       cpuSpark.update('none');
-
+    
       memSpark.data.labels = xLabels;
       memSpark.data.datasets[0].data = memSeries;
       memSpark.update('none');
-
+    
       diskSpark.data.labels = xLabels;
       diskSpark.data.datasets[0].data = diskSeries;
       diskSpark.update('none');
+    
+      throughputSpark.data.labels = xLabels;
+      throughputSpark.data.datasets[0].data = throughputSeries;
+      throughputSpark.update('none');
     }
+
+
+
 
     // ---- Rendering from history ----
 
@@ -922,6 +974,22 @@
         return (used / total) * 100.0;
       });
       const diskSeries = visibleHistory.map(h => h.disk_used_pct);
+    // Total throughput series (KB/s) for sparkline
+    const windowSec = intervalSeconds || 60;
+    const throughputSeries = visibleHistory.map(h => {
+      const inB = (typeof h.in_bytes === "number")
+        ? h.in_bytes
+        : (h.total_bytes || 0);
+      const outB = (typeof h.out_bytes === "number")
+        ? h.out_bytes
+        : 0;
+      const sumB = inB + outB;
+      if (!windowSec || windowSec <= 0) return 0;
+      return sumB / 1024.0 / windowSec; // KB/s total
+    });
+
+
+
 
       // Latest sample always from full history
       const latest = history[history.length - 1];
@@ -1076,17 +1144,17 @@
         document.getElementById('metric-churn').textContent = "Churn: –";
       }
 
-      if (!chartsInitialized) {
-        initCharts(labels, peers, inboundKB, outboundKB);
-      } else {
-        updateCharts(labels, peers, inboundKB, outboundKB);
-      }
+    if (!chartsInitialized) {
+      initCharts(labels, peers, inboundKB, outboundKB);
+    } else {
+      updateCharts(labels, peers, inboundKB, outboundKB);
+    }
 
-      if (!sparksInitialized) {
-        initSparklines(cpuSeries, memPctSeries, diskSeries, labels);
-      } else {
-        updateSparklines(cpuSeries, memPctSeries, diskSeries, labels);
-      }
+    if (!sparksInitialized) {
+      initSparklines(cpuSeries, memPctSeries, diskSeries, throughputSeries, labels);
+    } else {
+      updateSparklines(cpuSeries, memPctSeries, diskSeries, throughputSeries, labels);
+    }
 
       updateTopTalkers(latestTop);
     }

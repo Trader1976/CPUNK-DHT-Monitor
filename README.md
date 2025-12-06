@@ -1,4 +1,5 @@
-<img width="1120" height="958" alt="Pasted image" src="https://github.com/user-attachments/assets/fe670212-b1db-402c-beba-c443eadd5d0d" />
+<img width="813" height="874" alt="Pasted image" src="https://github.com/user-attachments/assets/0c1c5633-81c4-45de-b9e4-6cee1c6333eb" />
+
 # CPUNK DHT Monitor
 
 A lightweight, real-time monitoring dashboard for CPUNK DHT bootstrap nodes and DNA-Messenger infrastructure.  
@@ -22,6 +23,7 @@ Built with **FastAPI**, **Chart.js**, and a **background packet capture engine**
 - Memory usage %
 - Disk usage (root filesystem)
 - Trendlines (sparklines) for CPU/RAM/Disk
+
 
 ### **Persistence**
 - SQLite database for long-term storage

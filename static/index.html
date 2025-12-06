@@ -317,6 +317,7 @@
         Consolas, "Liberation Mono", "Courier New", monospace;
       font-size: 11px;
     }
+
     .footer {
       margin-top: 16px;
       font-size: 11px;
@@ -325,6 +326,22 @@
       justify-content: space-between;
       gap: 8px;
       flex-wrap: wrap;
+      align-items: center;
+    }
+    .footer-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .export-buttons {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .export-btn {
+      font-size: 10px;
+      padding: 3px 8px;
     }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -476,7 +493,25 @@
 
     <div class="footer">
       <div id="iface-line">Interface: –</div>
-      <div>CPUNK / DNA-Messenger infra helper</div>
+      <div class="footer-right">
+        <div>CPUNK / DNA-Messenger infra helper</div>
+        <div class="export-buttons">
+          <button
+            type="button"
+            class="tf-btn export-btn"
+            onclick="exportJSON()"
+            title="Download visible history as JSON">
+            Export JSON
+          </button>
+          <button
+            type="button"
+            class="tf-btn export-btn"
+            onclick="exportCSV()"
+            title="Download visible history as CSV">
+            Export CSV
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -540,6 +575,16 @@
         return t >= cutoff;
       });
       return filtered;
+    }
+
+    // Get the history slice for the current timeframe (used by charts + exports)
+    function getVisibleHistory() {
+      if (!lastHistory || lastHistory.length === 0) return [];
+      let visible = filterHistoryByTimeframe(lastHistory, currentTimeframe);
+      if (visible.length === 0) {
+        visible = lastHistory.slice();
+      }
+      return visible;
     }
 
     // Format uptime seconds into "Xd Yh", "Xh Ym", or "Xm"
@@ -820,12 +865,8 @@
         return;
       }
 
-      // Apply timeframe
-      let visibleHistory = filterHistoryByTimeframe(history, currentTimeframe);
-      if (visibleHistory.length === 0) {
-        visibleHistory = history.slice();
-      }
-
+      // Apply timeframe (same as export will use)
+      let visibleHistory = getVisibleHistory();
       dataPointsEl.textContent = "Data points: " + visibleHistory.length;
 
       // Labels / peers for visible window
@@ -992,6 +1033,81 @@
       updateTopTalkers(latestTop);
     }
 
+    // ---- Export helpers ----
+
+    function downloadBlob(content, mimeType, filename) {
+      const blob = new Blob([content], { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    function exportJSON() {
+      const visible = getVisibleHistory();
+      if (!visible || visible.length === 0) {
+        alert("No data to export for current timeframe.");
+        return;
+      }
+      const pretty = JSON.stringify(visible, null, 2);
+      const ts = new Date().toISOString().replace(/[:.]/g, "-");
+      const filename = `dht_metrics_${currentTimeframe}_${ts}.json`;
+      downloadBlob(pretty, "application/json", filename);
+    }
+
+    function exportCSV() {
+      const visible = getVisibleHistory();
+      if (!visible || visible.length === 0) {
+        alert("No data to export for current timeframe.");
+        return;
+      }
+
+      // Fixed set of fields we care about
+      const fields = [
+        "ts",
+        "unique_peers",
+        "total_bytes",
+        "total_packets",
+        "in_bytes",
+        "out_bytes",
+        "in_packets",
+        "out_packets",
+        "new_peers",
+        "expired_peers",
+        "cpu_usage",
+        "mem_used_mb",
+        "mem_total_mb",
+        "disk_used_pct",
+        "disk_used_gb",
+        "disk_free_gb"
+      ];
+
+      const header = fields.join(",");
+      const lines = [header];
+
+      visible.forEach(row => {
+        const line = fields.map(key => {
+          let v = row[key];
+          if (v === undefined || v === null) return "";
+          if (typeof v === "string") {
+            const safe = v.replace(/"/g, '""');
+            return `"${safe}"`;
+          }
+          return String(v);
+        }).join(",");
+        lines.push(line);
+      });
+
+      const csv = lines.join("\n");
+      const ts = new Date().toISOString().replace(/[:.]/g, "-");
+      const filename = `dht_metrics_${currentTimeframe}_${ts}.csv`;
+      downloadBlob(csv, "text/csv", filename);
+    }
+
     // ---- Config, fetch & health ----
 
     async function fetchConfig() {
@@ -1036,7 +1152,7 @@
         const history = data.history || [];
         const latestTop = data.latest_top || [];
 
-        // cache for timeframe switching
+        // cache for timeframe switching + exports
         lastHistory = history;
         lastLatestTop = latestTop;
 

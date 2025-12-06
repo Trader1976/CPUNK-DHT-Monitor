@@ -277,9 +277,13 @@
       margin-bottom: 6px;
     }
 
-    /* Let Chart.js control height via aspectRatio, just make it full width */
     canvas {
       width: 100%;
+    }
+
+    /* Only main charts (Peers / Traffic) */
+    .charts canvas {
+      height: 520px;
     }
 
     .table-card {
@@ -553,7 +557,7 @@
       }
     }
 
-    function initCharts(labels, peers, trafficKB) {
+    function initCharts(labels, peers, trafficInKB, trafficOutKB) {
       const peersCtx = document.getElementById('peersChart').getContext('2d');
       const trafficCtx = document.getElementById('trafficChart').getContext('2d');
 
@@ -569,7 +573,7 @@
         },
         options: {
           responsive: true,
-          aspectRatio: 1.0, // taller than default (2)
+          aspectRatio: 1.2,
           interaction: {
             mode: "index",
             intersect: false
@@ -608,21 +612,28 @@
         type: 'line',
         data: {
           labels: labels,
-          datasets: [{
-            label: 'KB per window',
-            data: trafficKB,
-            tension: 0.2,
-          }]
+          datasets: [
+            {
+              label: 'Inbound KB',
+              data: trafficInKB,
+              tension: 0.2,
+            },
+            {
+              label: 'Outbound KB',
+              data: trafficOutKB,
+              tension: 0.2,
+            }
+          ]
         },
         options: {
           responsive: true,
-          aspectRatio: 1.5,
+          aspectRatio: 1.2,
           interaction: {
             mode: "index",
             intersect: false
           },
           plugins: {
-            legend: { display: false },
+            legend: { display: true },
             tooltip: {
               callbacks: {
                 title: function(context) {
@@ -631,7 +642,9 @@
                 },
                 label: function(context) {
                   const value = context.raw;
-                  return `Traffic: ${value.toFixed(1)} KB`;
+                  const label = context.dataset.label || "Traffic";
+                  const v = (typeof value === "number" ? value : 0).toFixed(1);
+                  return `${label}: ${v} KB`;
                 }
               }
             }
@@ -653,7 +666,7 @@
       chartsInitialized = true;
     }
 
-    function updateCharts(labels, peers, trafficKB) {
+    function updateCharts(labels, peers, trafficInKB, trafficOutKB) {
       if (!peersChart || !trafficChart) return;
 
       peersChart.data.labels = labels;
@@ -661,7 +674,8 @@
       peersChart.update('none');
 
       trafficChart.data.labels = labels;
-      trafficChart.data.datasets[0].data = trafficKB;
+      trafficChart.data.datasets[0].data = trafficInKB;
+      trafficChart.data.datasets[1].data = trafficOutKB;
       trafficChart.update('none');
     }
 
@@ -810,7 +824,7 @@
 
       dataPointsEl.textContent = "Data points: " + visibleHistory.length;
 
-      // Labels / peers / traffic for visible window
+      // Labels / peers for visible window
       const labels = visibleHistory.map(h => {
         const ts = h.ts;
         if (!ts) return "";
@@ -824,7 +838,24 @@
       });
 
       const peers = visibleHistory.map(h => h.unique_peers || 0);
-      const trafficKB = visibleHistory.map(h => (h.total_bytes || 0) / 1024.0);
+
+      // Traffic: inbound/outbound series (KB)
+      const inboundKB = visibleHistory.map(h => {
+        if (typeof h.in_bytes === "number") {
+          return h.in_bytes / 1024.0;
+        }
+        // fallback: when old data has no in_bytes, treat all as inbound
+        const tb = h.total_bytes || 0;
+        return tb / 1024.0;
+      });
+
+      const outboundKB = visibleHistory.map(h => {
+        if (typeof h.out_bytes === "number") {
+          return h.out_bytes / 1024.0;
+        }
+        // fallback: 0 when no separate outbound data
+        return 0;
+      });
 
       // System metric series for sparklines (visible window)
       const cpuSeries = visibleHistory.map(h => h.cpu_usage);
@@ -841,9 +872,21 @@
       document.getElementById('metric-current-peers').textContent =
         latest.unique_peers || 0;
 
-      const lastKB = latest.total_bytes ? formatBytesToKB(latest.total_bytes) : "0.0";
-      document.getElementById('metric-current-traffic').textContent =
-        lastKB + " KB";
+      // Traffic (last window) card: show IN / OUT if available
+      const lastIn = typeof latest.in_bytes === "number" ? latest.in_bytes : null;
+      const lastOut = typeof latest.out_bytes === "number" ? latest.out_bytes : null;
+
+      let trafficLabel;
+      if (lastIn !== null || lastOut !== null) {
+        const inText = formatBytesToKB(lastIn || 0);
+        const outText = formatBytesToKB(lastOut || 0);
+        trafficLabel = `${inText} KB in / ${outText} KB out`;
+      } else {
+        const lastKB = latest.total_bytes ? formatBytesToKB(latest.total_bytes) : "0.0";
+        trafficLabel = `${lastKB} KB total`;
+      }
+
+      document.getElementById('metric-current-traffic').textContent = trafficLabel;
 
       // Total traffic over full history (all time)
       const totalBytes = history.reduce((acc, h) => acc + (h.total_bytes || 0), 0);
@@ -904,16 +947,23 @@
         "Max peers: " + maxPeers;
 
       const maxBytes = visibleHistory.reduce(
-        (max, h) => Math.max(max, h.total_bytes || 0),
+        (max, h) => {
+          // Prefer in+out if available; else total_bytes
+          if (typeof h.in_bytes === "number" || typeof h.out_bytes === "number") {
+            const sum = (h.in_bytes || 0) + (h.out_bytes || 0);
+            return Math.max(max, sum);
+          }
+          return Math.max(max, h.total_bytes || 0);
+        },
         0
       );
       document.getElementById('metric-max-traffic').textContent =
         "Peak window: " + formatBytesToKB(maxBytes) + " KB";
 
       if (!chartsInitialized) {
-        initCharts(labels, peers, trafficKB);
+        initCharts(labels, peers, inboundKB, outboundKB);
       } else {
-        updateCharts(labels, peers, trafficKB);
+        updateCharts(labels, peers, inboundKB, outboundKB);
       }
 
       if (!sparksInitialized) {

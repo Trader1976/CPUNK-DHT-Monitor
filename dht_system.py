@@ -3,11 +3,13 @@ System-level metrics and DNA-Nodus process inspection.
 
 - get_system_metrics(): CPU, RAM, disk usage for the host
 - get_dna_nodus_process_info(): status/CPU/RAM/uptime for dna-nodus process
+- get_local_ipv4_addresses(): helper for capture direction classification
 """
 
 import logging
 import time
-from typing import Dict, Optional
+from typing import Dict, Optional, Set
+import socket
 
 import psutil
 
@@ -99,3 +101,30 @@ def get_dna_nodus_process_info(process_name: str = "dna-nodus") -> Dict[str, Opt
         logging.warning("Error while scanning for process %s", process_name, exc_info=True)
 
     return info
+
+
+def get_local_ipv4_addresses(interface_filter: Optional[str] = None) -> Set[str]:
+    """
+    Return a set of local IPv4 addresses for this host.
+
+    If interface_filter is:
+      - None       -> all interfaces
+      - "any"      -> all interfaces (tshark-style)
+      - otherwise  -> only the interface with that exact name
+    """
+    addrs: Set[str] = set()
+
+    try:
+        for if_name, addr_list in psutil.net_if_addrs().items():
+            # Respect interface filter (if any)
+            if interface_filter and interface_filter != "any":
+                if if_name != interface_filter:
+                    continue
+
+            for addr in addr_list:
+                if addr.family == socket.AF_INET:
+                    addrs.add(addr.address)
+    except Exception:
+        logging.warning("Failed to enumerate local IPv4 addresses", exc_info=True)
+
+    return addrs

@@ -11,17 +11,13 @@ Responsibilities:
 import logging
 import socket
 import hashlib
-
 import os
 import secrets
-
-from fastapi import Depends, HTTPException, status
-#from fastapi.security import HTTPBasic, HTTPBasicCredentials
-
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any, Dict
 
-from fastapi import FastAPI
+from fastapi import Depends, HTTPException, status, FastAPI
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -41,46 +37,62 @@ from dht_core import (
     get_db_stats,
 )
 
-# Base paths
+# ---------------------------------------------------------------------------
+# Auth toggle
+# ---------------------------------------------------------------------------
+
+#: Master switch. Set to True to enforce HTTP Basic auth for all endpoints.
+#: Set to False to make the monitor fully public.
+AUTH_ENABLED: bool = False
+
+# ---------------------------------------------------------------------------
+# Paths / app
+# ---------------------------------------------------------------------------
+
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 INDEX_HTML = STATIC_DIR / "index.html"
 
 app = FastAPI(
     title="CPUNK DHT Monitor",
-    version="0.2.0",
+    version="0.3.0",
     description="Monitoring application for CPUNK DNA-Nodus / DHT bootstrap nodes.",
 )
 
-# Serve /static/... for assets (JS, CSS, images if you add them later)
+# Serve /static/... for assets (JS, CSS, images etc.)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+security = HTTPBasic()
 
-#security = HTTPBasic()
 
-#security = HTTPBasic()
-
-def get_current_user(): #credentials: HTTPBasicCredentials = Depends(security)):
+def get_current_user(credentials: HTTPBasicCredentials = Depends(security)) -> str:
     """
     HTTP Basic auth for the whole DHT monitor.
 
-    Credentials source:
-      - DHT_MONITOR_USER          -> expected username (plaintext)
-      - DHT_MONITOR_PASS          -> expected password (PLAINTEXT, legacy)
-      - DHT_MONITOR_PASS_HASH     -> expected password SHA-256 hex (preferred)
+    Credentials source (environment):
+      - DHT_MONITOR_USER       -> expected username (plaintext)
+      - DHT_MONITOR_PASS       -> expected password (PLAINTEXT, legacy)
+      - DHT_MONITOR_PASS_HASH  -> expected password SHA3-512 hex (preferred)
 
     Priority:
       1. If DHT_MONITOR_PASS_HASH is set, we ONLY check against the hash.
       2. Else if DHT_MONITOR_PASS is set, we check plaintext.
       3. If neither is set (or no user), auth is disabled (allow all).
+
+    If AUTH_ENABLED is False, this function short-circuits and always returns
+    "anonymous" without requiring credentials.
     """
+    # Global kill-switch for auth
+    if not AUTH_ENABLED:
+        return "anonymous"
+
     expected_user = os.environ.get("DHT_MONITOR_USER")
     expected_pass = os.environ.get("DHT_MONITOR_PASS")
     expected_hash = os.environ.get("DHT_MONITOR_PASS_HASH")
 
-    # If nothing configured, do NOT enforce auth (to avoid accidental lock-out)
+    # If nothing configured, do NOT enforce auth (avoid accidental lock-out)
     if not expected_user or (not expected_pass and not expected_hash):
-      return "anonymous"
+        return "anonymous"
 
     # Username check (plaintext, not really sensitive)
     if not secrets.compare_digest(credentials.username, expected_user):
@@ -92,9 +104,8 @@ def get_current_user(): #credentials: HTTPBasicCredentials = Depends(security)):
 
     # Password check – prefer hash if configured
     provided_password = credentials.password or ""
-
     if expected_hash:
-        # SHA3-512 hex comparison (post-quantum-friendly hash)
+        # SHA3-512 hex comparison
         candidate_hash = hashlib.sha3_512(
             provided_password.encode("utf-8")
         ).hexdigest()
@@ -113,18 +124,17 @@ def get_current_user(): #credentials: HTTPBasicCredentials = Depends(security)):
     return credentials.username
 
 
+# Shared dependency list for all routes – toggled by AUTH_ENABLED
+ROUTE_DEPS = [Depends(get_current_user)] if AUTH_ENABLED else []
 
-
-
-# ------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Startup
-# ------------------------------------------------------------
+# ---------------------------------------------------------------------------
+
 
 @app.on_event("startup")
 def on_startup() -> None:
-    """
-    Initialize logging, database, and start the capture thread.
-    """
+    """Initialize logging, database, and start the capture thread."""
     setup_logging()
     logging.info("Starting CPUNK DHT Monitor FastAPI application")
 
@@ -137,15 +147,14 @@ def on_startup() -> None:
     logging.info("Background capture thread started")
 
 
-# ------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # UI: serve index.html
-# ------------------------------------------------------------
+# ---------------------------------------------------------------------------
 
-@app.get("/", include_in_schema=False, dependencies=[]) #Depends(get_current_user)])
+
+@app.get("/", include_in_schema=False, dependencies=ROUTE_DEPS)
 async def serve_index():
-    """
-    Serve the main dashboard UI from static/index.html.
-    """
+    """Serve the main dashboard UI from static/index.html."""
     if not INDEX_HTML.exists():
         logging.error("index.html not found at %s", INDEX_HTML)
         return JSONResponse(
@@ -156,33 +165,37 @@ async def serve_index():
     return FileResponse(str(INDEX_HTML))
 
 
-# ------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # API: metrics
-# ------------------------------------------------------------
+# ---------------------------------------------------------------------------
 
-@app.get("/metrics.json", dependencies=[]) #Depends(get_current_user)])
+
+@app.get("/metrics.json", dependencies=ROUTE_DEPS)
 async def metrics() -> Dict[str, Any]:
     """
-    Return current metrics history and top talkers.
+    Return current metrics history and node candidates.
 
     Response schema:
     {
-      "history": [ { ts, unique_peers, total_bytes, total_packets, ... }, ... ],
-      "latest_top": [ { ip, bytes, packets }, ... ]
+      "history": [ ... ],
+      "latest_top": [ ... ],          # still provided, but UI ignores it
+      "node_candidates": [ ... ]      # heuristic DHT-node guesses (hashed IDs)
     }
     """
-    history, latest_top = get_metrics_snapshot()
+    history, latest_top, node_candidates = get_metrics_snapshot()
     return {
         "history": history,
         "latest_top": latest_top,
+        "node_candidates": node_candidates,
     }
 
 
-# ------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # API: health (includes dna-nodus process info)
-# ------------------------------------------------------------
+# ---------------------------------------------------------------------------
 
-@app.get("/health", dependencies=[]) #Depends(get_current_user)])
+
+@app.get("/health", dependencies=ROUTE_DEPS)
 async def health() -> Dict[str, Any]:
     """
     Return overall monitor health plus dna-nodus process info.
@@ -195,31 +208,32 @@ async def health() -> Dict[str, Any]:
     return info
 
 
-# ------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # API: config.json (used by front-end UI)
-# ------------------------------------------------------------
+# ---------------------------------------------------------------------------
 
-@app.get("/config.json", dependencies=[]) #Depends(get_current_user)])
+
+@app.get("/config.json", dependencies=ROUTE_DEPS)
 async def config() -> Dict[str, Any]:
     """
     Return UI config:
 
     {
-      "hostname": "<this host>",
-      "port": <DHT UDP port>,
-      "iface": "<capture interface>",
-      "interval_seconds": <capture interval>,
-      "http_host": "<HTTP bind host>",
-      "http_port": <HTTP bind port>
+      "hostname": "",
+      "port": ,
+      "iface": "",
+      "interval_seconds": ,
+      "http_host": "",
+      "http_port": 
     }
 
     The index.html currently uses hostname, port, iface, interval_seconds.
     Extra fields (http_host, http_port) are just informational.
     """
     try:
-      hostname = socket.gethostname()
+        hostname = socket.gethostname()
     except Exception:
-      hostname = "unknown"
+        hostname = "unknown"
 
     return {
         "hostname": hostname,
@@ -231,17 +245,18 @@ async def config() -> Dict[str, Any]:
     }
 
 
-# ------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # API: DB stats
-# ------------------------------------------------------------
+# ---------------------------------------------------------------------------
 
-@app.get("/db_stats", dependencies=[]) #Depends(get_current_user)])
+
+@app.get("/db_stats", dependencies=ROUTE_DEPS)
 async def db_stats() -> Dict[str, Any]:
     """
     Simple introspection endpoint for the SQLite store.
 
     {
-      "rows": <int>,
+      "rows": ,
       "oldest_ts": "2025-12-06T00:00:00+00:00" | null,
       "newest_ts": "2025-12-06T11:20:00+00:00" | null
     }
@@ -254,9 +269,9 @@ async def db_stats() -> Dict[str, Any]:
     }
 
 
-# ------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Dev entrypoint (for running directly: python dht_fastapi_app.py)
-# ------------------------------------------------------------
+# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     import uvicorn

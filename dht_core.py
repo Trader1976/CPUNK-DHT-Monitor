@@ -7,13 +7,13 @@ smaller modules (dht_config, dht_db, dht_metrics, dht_system, dht_capture)
 and keep this as a stable API surface for the FastAPI app.
 
 Anything importing from dht_core should continue to work:
-- setup_logging()
-- init_db()
-- start_capture_thread()
-- capture_loop()          <- backward-compatible wrapper
-- get_metrics_snapshot()
-- get_health_info()
-- get_db_stats()
+  - setup_logging()
+  - init_db()
+  - start_capture_thread()
+  - capture_loop()  <- backward-compatible wrapper
+  - get_metrics_snapshot()
+  - get_health_info()
+  - get_db_stats()
 """
 
 import logging
@@ -43,11 +43,7 @@ from dht_capture import (
 
 
 def setup_logging() -> None:
-    """
-    Configure the root logger for the monitor.
-
-    Call this once from your main entrypoint before starting capture + API.
-    """
+    """Configure the root logger for the monitor."""
     logging.basicConfig(
         level=LOG_LEVEL,
         format="%(asctime)s [%(levelname)s] %(message)s",
@@ -55,30 +51,28 @@ def setup_logging() -> None:
 
 
 def init_db() -> None:
-    """
-    Initialize SQLite database (delegates to dht_db.init_db).
-    """
+    """Initialize SQLite database (delegates to dht_db.init_db)."""
     _init_db()
 
 
 def get_db_stats():
-    """
-    Return (row_count, oldest_ts, newest_ts) from SQLite.
-    """
+    """Return (row_count, oldest_ts, newest_ts) from SQLite."""
     return _get_db_stats()
 
 
 def get_metrics_snapshot():
     """
-    Return (history, latest_top) used by /metrics.json.
+    Return (history, latest_top, node_candidates) used by /metrics.json.
+
+    - history: list[window_dict]
+    - latest_top: list of top talkers (still computed, but UI ignores IPs)
+    - node_candidates: heuristic DHT-node candidates (hashed IDs, no raw IPs)
     """
     return _get_metrics_snapshot()
 
 
 def get_health_info():
-    """
-    Return health summary + DNA-Nodus process info for /health.
-    """
+    """Return health summary + DNA-Nodus process info for /health."""
     return _get_health_info()
 
 

@@ -1,5 +1,6 @@
 
-<img width="890" height="876" alt="Pasted image (2)" src="https://github.com/user-attachments/assets/caf098f9-42e3-46a6-b976-41f8ba770c6f" />
+<img width="1198" height="810" alt="Pasted image" src="https://github.com/user-attachments/assets/00591ca7-c0f4-4c7f-bfd8-a7071b4480a7" />
+
 
 # CPUNK DHT Monitor
 

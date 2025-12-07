@@ -16,7 +16,7 @@ import os
 import secrets
 
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+#from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from pathlib import Path
 from typing import Any, Dict, Tuple
@@ -56,11 +56,11 @@ app = FastAPI(
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
-security = HTTPBasic()
+#security = HTTPBasic()
 
-security = HTTPBasic()
+#security = HTTPBasic()
 
-def get_current_user(credentials: HTTPBasicCredentials = Depends(security)):
+def get_current_user(): #credentials: HTTPBasicCredentials = Depends(security)):
     """
     HTTP Basic auth for the whole DHT monitor.
 
@@ -141,7 +141,7 @@ def on_startup() -> None:
 # UI: serve index.html
 # ------------------------------------------------------------
 
-@app.get("/", include_in_schema=False, dependencies=[Depends(get_current_user)])
+@app.get("/", include_in_schema=False, dependencies=[]) #Depends(get_current_user)])
 async def serve_index():
     """
     Serve the main dashboard UI from static/index.html.
@@ -160,7 +160,7 @@ async def serve_index():
 # API: metrics
 # ------------------------------------------------------------
 
-@app.get("/metrics.json", dependencies=[Depends(get_current_user)])
+@app.get("/metrics.json", dependencies=[]) #Depends(get_current_user)])
 async def metrics() -> Dict[str, Any]:
     """
     Return current metrics history and top talkers.
@@ -182,7 +182,7 @@ async def metrics() -> Dict[str, Any]:
 # API: health (includes dna-nodus process info)
 # ------------------------------------------------------------
 
-@app.get("/health", dependencies=[Depends(get_current_user)])
+@app.get("/health", dependencies=[]) #Depends(get_current_user)])
 async def health() -> Dict[str, Any]:
     """
     Return overall monitor health plus dna-nodus process info.
@@ -199,7 +199,7 @@ async def health() -> Dict[str, Any]:
 # API: config.json (used by front-end UI)
 # ------------------------------------------------------------
 
-@app.get("/config.json", dependencies=[Depends(get_current_user)])
+@app.get("/config.json", dependencies=[]) #Depends(get_current_user)])
 async def config() -> Dict[str, Any]:
     """
     Return UI config:
@@ -235,7 +235,7 @@ async def config() -> Dict[str, Any]:
 # API: DB stats
 # ------------------------------------------------------------
 
-@app.get("/db_stats", dependencies=[Depends(get_current_user)])
+@app.get("/db_stats", dependencies=[]) #Depends(get_current_user)])
 async def db_stats() -> Dict[str, Any]:
     """
     Simple introspection endpoint for the SQLite store.
